@@ -1,0 +1,627 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: MohdSaquib.com Website CFN Infrastructure V5
+
+Parameters:
+  NameOfBucket:
+    Description: Enter a Bucket Name
+    Type: String
+    Default: "resume"
+  CreatedAtDate:
+    Description: Enter Current Date
+    Type: String
+    Default: "2020-01-01"
+    AllowedPattern: "^\\d{4}(-\\d{2}){2}"
+    ConstraintDescription: "Date of Creation"
+  HostedZoneId:
+    Description: Select The HostedZone for Route53
+    Type: AWS::Route53::HostedZone::Id
+  CloudFrontDistributionComment:
+    Description: Enter a Comment for CloudFront Distribution
+    Type: String
+    Default: CloudFront Distribution for Resume Website
+  DynamoDBTableName:
+    Description: Enter a Name for the DynamoDB Table
+    Type: String
+    Default: Site_Visits
+  LambdaFunctionName:
+    Description: Enter a Name of the Lambda Function
+    Type: String
+    Default: SiteVisitsFunction
+  ProjectName:
+    Description: Enter a Project Name to track Costs
+    Type: String
+  CreatedBy:
+    Description: Enter the Developer's Name
+    Type: String
+    Default: Mohd Nazmus Saquib
+  ApiUsagePlanDescription:
+    Description: Enter a Description for API Usage Plan
+    Type: String
+    Default: Usage Plan of Resume Api
+  ApiUsagePlanName:
+    Description: Enter a Name for API Usage Plan
+    Type: String
+    Default: ApiUsagePlan
+  ApiName:
+    Description: Enter a Name for the API
+    Type: String
+    Default: APINAME
+  ApiDescription:
+    Description: Enter a Description for the API
+    Type: String
+    Default: Api for resume.mohdsaquib.com
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: S3 Configuration
+        Parameters:
+          - NameOfBucket
+      - Label:
+          default: Back-End Configuration
+        Parameters:
+          - CloudFrontDistributionComment
+          - DynamoDBTableName
+          - LambdaFunctionName
+      - Label:
+          default: API Configuration
+        Parameters:
+          - ApiName
+          - ApiDescription
+          - ApiUsagePlanName
+          - ApiUsagePlanDescription
+      - Label:
+          default: Other Congifuration
+        Parameters:
+          - HostedZoneId
+      - Label:
+          default: Tags
+        Parameters:
+          - CreatedAtDate
+          - CreatedBy
+          - ProjectName
+    ParameterLabels:
+      CreatedAtDate:
+        default: Date of Creation
+      NameOfBucket:
+        default: S3 Bucket Name
+      CloudFrontDistributionComment:
+        default: CloudFront Distribution Comment
+      DynamoDBTableName:
+        default: DynamoDB Table Name
+      LambdaFunctionName:
+        default: Function Name
+      HostedZoneId:
+        default: Hosted Zone ID
+      CreatedBy:
+        default: Developer's Name
+      ProjectName:
+        default: Project Name
+      ApiUsagePlanDescription:
+        default: Api Usage Plan Description
+      ApiUsagePlanName:
+        default: Api Usage Plan Name
+      ApiName:
+        default: Api Name
+      ApiDescription:
+        default: Api Description
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      HostedId: Z3AQBSTGFYJSTF
+    us-east-2:
+      HostedId: Z2O1EMRO9K5GLX
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join [".", [!Ref NameOfBucket, mohdsaquib.com]]
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: logs
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: 404.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join [".", [logs, !Sub "${NameOfBucket}.mohdsaquib.com"]]
+      AccessControl: LogDeliveryWrite
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteFilesOver7Days_logs
+            Prefix: logs/
+            Status: Enabled
+            ExpirationInDays: 6
+            NoncurrentVersionExpirationInDays: 1
+          - Id: DeleteFilesOver7Days_cdn
+            Prefix: cdn/
+            Status: Enabled
+            ExpirationInDays: 6
+            NoncurrentVersionExpirationInDays: 1
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  BucketPolicy:
+    DependsOn: CloudFrontOAI
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Id: Policy
+        Statement:
+          - Sid: BucketWebsitePolicy
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOAI}"
+            Action: "s3:GetObject"
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref S3Bucket, "/*"]]
+
+  CodeCommitRepo:
+    DependsOn: S3Bucket
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryDescription: Resume Website
+      RepositoryName: !Sub "${S3Bucket}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: "codepipeline-service"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: "Allow"
+                Action: "*"
+                Resource: "*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  CodePipeline:
+    DependsOn: CodeCommitRepo
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Sub "${S3Bucket}"
+        Type: S3
+      Name: !Sub "${NameOfBucket}.mohdsaquib.com.pipepline"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                RepositoryName: !Sub "${S3Bucket}"
+                BranchName: master
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: output
+        - Name: Deploy
+          Actions:
+            - Name: S3Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: S3
+                Version: 1
+              InputArtifacts:
+                - Name: output
+              Configuration:
+                BucketName: !Ref S3Bucket
+                Extract: true
+              RunOrder: 1
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  ACMCertificate:
+    DependsOn: S3Bucket
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Join [".", [!Ref NameOfBucket, mohdsaquib.com]]
+      DomainValidationOptions:
+        - DomainName: !Join [".", [!Ref NameOfBucket, mohdsaquib.com]]
+          ValidationDomain: !Join [".", [!Ref NameOfBucket, mohdsaquib.com]]
+      ValidationMethod: EMAIL
+      Tags:
+        - Key: Name
+          Value: !Sub "${NameOfBucket}.mohdsaquib.com Certificate"
+        - Key: Domain Count
+          Value: 1
+        - Key: Root Enabled
+          Value: No
+        - Key: Website Type
+          Value: Prod
+        - Key: www enabled
+          Value: No
+
+  CloudFrontOAI:
+    DependsOn: ACMCertificate
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "${NameOfBucket}"
+
+  CloudFront:
+    DependsOn: ACMCertificate
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Sub "${NameOfBucket}.mohdsaquib.com"
+        Comment: !Ref CloudFrontDistributionComment
+        Origins:
+          - DomainName: !Sub "${NameOfBucket}.mohdsaquib.com.s3.amazonaws.com"
+            Id: !Sub "S3-${NameOfBucket}.mohdsaquib.com"
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOAI}"
+        DefaultCacheBehavior:
+          CachePolicyId: <CACHEPOLICYID>
+          Compress: true
+          AllowedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: !Sub "S3-${NameOfBucket}.mohdsaquib.com"
+          ViewerProtocolPolicy: redirect-to-https
+        Enabled: true
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2019
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        Logging:
+          Bucket: !Sub "${LoggingBucket}.s3.amazonaws.com"
+          Prefix: cdn/
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  Route53Config:
+    DependsOn: S3Bucket
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "${NameOfBucket}.mohdsaquib.com"
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFront.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref Api
+      Description: "Rest API Stage"
+      StageName: Stage
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiDeployment
+      RestApiId: !Ref Api
+      StageName: Prod
+
+  ApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Ref ApiStage
+      Description: !Ref ApiUsagePlanDescription
+      Throttle:
+        BurstLimit: 5
+        RateLimit: 3
+      UsagePlanName: !Ref ApiUsagePlanName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: !Ref ApiDescription
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Body:
+        info:
+          version: 1.0
+          title: !Ref ApiName
+        paths:
+          /visitorCount:
+            options:
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: |
+                    {
+                      "statusCode" : 200
+                    }
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseTemplates:
+                      application/json: |
+                        {}
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: >-
+                        'Content-Type,X-Amz-Date,Authorization,X-Api-Key,x-requested-with'
+              consumes:
+                - application/json
+              summary: CORS support
+              responses:
+                "200":
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+                  description: Default response for CORS method
+              produces:
+                - application/json
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub >-
+                  arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations
+              responses: {}
+        swagger: 2.0
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  FunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      Principal: apigateway.amazonaws.com
+      FunctionName: !Ref Function
+      SourceArn: !Sub
+        - >-
+          arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${__ApiId__}/${__Stage__}/GET/visitorCount
+        - __Stage__: "*"
+          __ApiId__: !Ref Api
+
+  DynamoDbTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref DynamoDBTableName
+      AttributeDefinitions:
+        - AttributeName: visits
+          AttributeType: S
+      KeySchema:
+        - AttributeName: visits
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: "LambdaExecutionRoleOfDynamoDB"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:UpdateItem"
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDbTable}"
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: "*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref LambdaFunctionName
+      Description: Updates DynamoDB for Site Counts
+      Environment:
+        Variables:
+          databaseName: !Ref DynamoDbTable
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Created_By
+          Value: !Ref CreatedBy
+        - Key: Created_At
+          Value: !Ref CreatedAtDate
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+
+          def lambda_handler(event, context):
+              dynamodb = boto3.resource('dynamodb')
+              DynamoDBTable = os.environ['databaseName']
+              table = dynamodb.Table(DynamoDBTable)
+
+              updated_response = table.update_item(
+                  Key={
+                      'visits': "views"
+                  },
+                  UpdateExpression='ADD Counts :value',
+                  ExpressionAttributeValues={
+                      ':value': 1
+                  },
+                  ReturnValues="UPDATED_NEW"
+              )
+              print(updated_response)
+
+              responseBody = json.dumps(
+                  {"views": int(float(updated_response["Attributes"]["Counts"]))})
+
+              apiResponse = {
+                  "isBase64Encoded": False,
+                  "statusCode": 200,
+                  "body": responseBody,
+                  "headers": {
+                      "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,x-requested-with",
+                      "Access-Control-Allow-Origin": "*",
+                      "Access-Control-Allow-Methods": "GET,OPTIONS"
+                  },
+              }
+
+              return apiResponse
+
+Outputs:
+  S3Bucket:
+    Description: S3 Bucket Name
+    Value: !Ref S3Bucket
+
+  S3LogBucket:
+    Description: S3 Log Bucket Name
+    Value: !Ref LoggingBucket
+
+  S3WebsiteURL:
+    Description: S3 Bucket Website URL
+    Value: !GetAtt S3Bucket.WebsiteURL
+
+  WebsiteURl:
+    Description: Website URL
+    Value: !Sub "http://${NameOfBucket}.mohdsaquib.com"
+
+  CodeRepoName:
+    Description: Repository Name
+    Value: !GetAtt CodeCommitRepo.Name
+
+  CodeRepoURL:
+    Description: Repository URL
+    Value: !GetAtt CodeCommitRepo.CloneUrlHttp
+
+  PipelineName:
+    Description: Name of the Pipeline
+    Value: !Sub "${S3Bucket}.pipepline"
+
+  PipelineURL:
+    Description: Pipeline Page
+    Value: !Sub "https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${NameOfBucket}.mohdsaquib.com.pipepline/view?region=us-east-1"
+
+  CloudFrontURL:
+    Description: CloudFront URL
+    Value: !GetAtt CloudFront.DomainName
+
+  CloudFrontOAI:
+    Description: OAI ID
+    Value: !Ref CloudFrontOAI
+
+  ApiProdEndpoint:
+    Description: API Gateway endpoint URL for Prod stage
+    Value: !Sub "https://${Api}.execute-api.us-east-1.amazonaws.com/Prod/visitorCount"

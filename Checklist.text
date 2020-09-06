@@ -1,0 +1,40 @@
+Infrastrucure V1
+==================================================
+1) S3 Bucket ✅
+2) Logs Bucket ✅
+3) Bucket Policy ✅
+3) S3 Bucket Website Enabled ✅
+4) S3 Versioning ✅
+
+Infrastrucure V2
+==================================================
+1) Add Code Commit Repository ✅
+2) Add IAM Role CodePipeline ✅
+3) CodePipeline ✅
+4) Uploads to S3 ✅
+5) Can be accessible using S3 website link ✅
+
+Infrastrucure V3
+==================================================
+1) Redirect S3 to CloudFront ✅
+2) Redirect CloudFront to Route53
+3) S3 Can be accessible to CloudFront OAI ✅
+4) Access website by Route53 ✅
+5) ACM Certificate ✅
+6) Link ACM to CloudFront Automatically ✅
+7) Update S3 Bucket Policy ✅
+8) Logs to S3 Logs Bucket ✅
+
+Infrastrucure V4
+==================================================
+1) Add Lambda function ✅
+2) Add API Gateway ✅
+3) Add DynamoDB ✅
+4) SiteCount Updates website ✅
+
+Infrastrucure V5
+==================================================
+1) Add MetaData to group Parameters ✅
+2) Setup Tag Parameters ✅
+3) Logs Bucket LifeCycle ✅
+4) API policy Plan ✅
